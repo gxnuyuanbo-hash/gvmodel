@@ -1,0 +1,6 @@
+.Rhistory
+.RData
+.DS_Store
+*.rds
+vignettes/cache/
+vignettes/figure/

@@ -1,0 +1,205 @@
+---
+title: "Estimating spreading breadth and verification ability with gvmodel"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Tutorial}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+
+
+This tutorial fits the generation–verification model to the remote associates responses of Experiment 1 in
+Beucler and De Neys (2026; osf.io/gfsb8). The model gives each participant two parameters: **spreading breadth**
+(*b*, logit scale), which determines which words come to mind, and **verification ability** (*v*), which determines
+whether the solution is recognized once it comes to mind. The steps are the same for any remote associates data set:
+
+1. build a word-association network (`gv_network`);
+2. prepare the responses: candidate sets, activation scores, and coded responses (`gv_prepare`);
+3. fit the model (`gv_fit`) and check convergence;
+4. read population and person parameters (`gv_population`, `gv_persons`);
+5. screen for careless responders (`gv_screen`) and compare model versions (`gv_compare`).
+
+## Installation
+
+The package needs a working [CmdStan](https://mc-stan.org/cmdstanr/) installation.
+
+
+``` r
+# install.packages("cmdstanr", repos = c("https://stan-dev.r-universe.dev", getOption("repos")))
+# cmdstanr::install_cmdstan()
+# remotes::install_github("gxnuyuanbo-hash/gvmodel")
+library(gvmodel)
+```
+
+
+
+## 1. The network
+
+The model spreads activation over a word-association network. We use the English Small World of Words norms
+(SWOW-EN18; De Deyne et al., 2019). Their license (CC BY-NC-ND) does not allow redistribution, so download
+`strength.SWOW-EN.R123.20180827.csv` from smallworldofwords.org and point `swow` to it. For Mandarin data, the
+SWOW-ZH norms (Li et al., 2025) have the same format.
+
+Any edge list with columns `from`, `to`, and `weight` works. Cues and solutions must be nodes; pass them as
+`extra_words` so that words that never served as SWOW cues are still included.
+
+
+``` r
+s <- read.delim(swow, quote = "", na.strings = character(), stringsAsFactors = FALSE)
+it <- read.csv2(file.path(gfsb8, "Data/items_characteristics.csv"), stringsAsFactors = FALSE)
+items <- data.frame(item = as.character(seq_len(nrow(it))), cues = it$problem, solution = it$solution)
+head(items, 3)
+#>   item                    cues solution
+#> 1    1 EXTINGUISHER/TRUCK/CAMP     FIRE
+#> 2    2       SURF/PADDLE/SKATE    BOARD
+#> 3    3      FOOT/BASKET/VOLLEY     BALL
+net <- gv_network(data.frame(from = s$cue, to = s$response, weight = s$R123.Strength),
+                  extra_words = unlist(strsplit(tolower(c(items$cues, items$solution)), "/")))
+length(net$nodes)
+#> [1] 12221
+```
+
+## 2. Preparing the responses
+
+`responses` needs three columns: `subject`, `item`, and `response`. An empty or missing response means "no
+answer". `items` gives the three cues and the accepted solutions of each item, separated by "/".
+
+
+``` r
+d <- read.csv(file.path(gfsb8, "Data/two_response_CRAT_data.csv"), stringsAsFactors = FALSE)
+d$response[d$response_type == "No_answer"] <- ""
+final <- subset(d, study == "1" & response_stage == "b" & subject != "S1_79")
+responses <- data.frame(subject = final$subject, item = as.character(final$item_number), response = final$response)
+head(responses)
+#>   subject item response
+#> 1    S1_1    1     FIRE
+#> 2    S1_1    2    BOARD
+#> 3    S1_1    3     BALL
+#> 4    S1_1    4     BIRD
+#> 5    S1_1    5    HONEY
+#> 6    S1_1    6     SORE
+```
+
+`gv_prepare` builds the candidate set of each item (the solutions, every response given to the item, and the 20
+most activated other words), computes each candidate's activation score across breadth, and codes the responses.
+Responses that are not in the network fall outside the candidate sets and are treated as missing. To score several
+samples on identical candidate sets, pass their pooled responses as `candidate_responses`; here we pool all samples
+and both responses of the original study, as in the article.
+
+
+``` r
+pool <- data.frame(subject = d$subject, item = as.character(d$item_number), response = d$response)
+prep <- gv_prepare(responses, items, net, candidate_responses = pool)
+prep
+#> gv_data: 99 participants, 24 items, candidates per item 29 to 129 
+#>   responses outside the candidate sets (treated as missing): 34 
+#>   participants without any usable response (excluded): 0 
+#>   Chebyshev terms: 20 (max error 0.008 )
+```
+
+## 3. Fitting the model
+
+`gv_fit` fits the generation–verification model by default. The likelihood integrates the person parameters out
+exactly, so MCMC samples only seven population parameters, and a fit takes a few minutes. The function reports
+whether the convergence criteria (R-hat ≤ 1.01, bulk and tail ESS ≥ 400, no divergent transitions) are met.
+
+
+``` r
+fit <- gv_fit(prep, model = "gv", iter = 750)
+fit
+#> gv_fit: gv model, 99 participants; converged (max R-hat 1.003, min ESS 1935, divergent 0)
+#>   parameter   mean  lower  upper
+#> 1        mu -0.316 -0.992  0.356
+#> 2     sigma  2.897  2.329  3.556
+#> 3     gamma  0.153  0.135  0.171
+#> 4     kappa -1.710 -2.114 -1.297
+#> 5     delta  3.994  3.849  4.132
+#> 6       tau  0.545  0.416  0.678
+#> 7       rho  0.426  0.156  0.645
+```
+
+μ and σ are the mean and standard deviation of logit breadth in the population, δ and τ those of verification
+ability, ρ their correlation, γ the weight of the activation score, and κ the utility of giving no answer.
+
+## 4. Person parameters
+
+`gv_persons` returns each participant's posterior mean and 90% interval of breadth and verification ability, with
+observed accuracy and the share of no-answer responses.
+
+
+``` r
+p <- gv_persons(fit)
+head(p, 5)
+#>   subject b_mean b_lower b_upper v_mean v_lower v_upper accuracy no_answer
+#> 1    S1_1  -1.67  -3.953    1.80   4.09    3.48    4.73    0.727     0.136
+#> 2    S1_2  -5.11  -6.843   -3.51   3.54    2.91    4.18    0.500     0.444
+#> 3    S1_3  -3.11  -4.706   -1.38   3.90    3.35    4.49    0.667     0.167
+#> 4    S1_4  -3.49  -5.119   -1.87   4.05    3.49    4.64    0.708     0.208
+#> 5    S1_5   1.84  -0.526    4.81   3.82    3.21    4.43    0.500     0.000
+cor(p$b_mean, p$accuracy)
+#> [1] 0.143
+cor(p$v_mean, p$accuracy)
+#> [1] 0.922
+```
+
+Accuracy depends mainly on verification ability; breadth shows in which wrong words people give and is only
+weakly related to accuracy. Breadth is estimated less precisely at the high end, where activation approaches the
+stationary distribution of the network and the posterior shrinks toward the population mean. When comparing
+individuals with very high breadth, use the intervals (`b_lower`, `b_upper`) rather than the posterior means alone.
+
+## 5. Screening and model comparison
+
+Random responders appear as very high breadth with low verification ability, and participants who give up appear as
+very low breadth. `gv_screen` standardizes each participant's estimates against the population and lists the most
+extreme participants first. It flags patterns; it does not exclude anyone. Inspect the flagged participants' raw
+responses before deciding, and refit without the excluded participants before reporting population parameters.
+
+
+``` r
+head(gv_screen(fit), 5)
+#>    subject b_mean b_lower b_upper v_mean v_lower v_upper accuracy no_answer   b_z    v_z pattern
+#> 7     S1_7  -5.35   -6.96   -3.88   3.45    2.83    4.07    0.417     0.500 -1.74 -0.997        
+#> 33   S1_33  -5.25   -6.81   -3.76   3.55    2.93    4.16    0.458     0.458 -1.70 -0.821        
+#> 2     S1_2  -5.11   -6.84   -3.51   3.54    2.91    4.18    0.500     0.444 -1.65 -0.836        
+#> 42   S1_42  -4.72   -6.20   -3.33   3.25    2.67    3.84    0.375     0.458 -1.52 -1.361        
+#> 18   S1_18  -4.47   -6.02   -3.00   3.54    2.96    4.13    0.500     0.375 -1.43 -0.835
+```
+
+`gv_compare` compares fitted versions by participant-wise PSIS-LOO. Here the generation–verification model is
+compared with the version in which all participants share one verification bonus.
+
+
+``` r
+shared <- gv_fit(prep, model = "shared", iter = 750)
+gv_compare(gv = fit, shared = shared)
+#>   model elpd_diff se_diff p_worse diag_diff diag_elpd
+#>      gv       0.0     0.0      NA                    
+#>  shared     -13.9     6.8    0.98   N < 100
+#> 
+#> Diagnostic flags present.
+#> See ?`loo-glossary` (sections `diag_diff` and `diag_elpd`)
+#> or https://mc-stan.org/loo/reference/loo-glossary.html.
+```
+
+The generation–verification model predicts better by about two standard errors. The diagnostic flag notes that
+with fewer than 100 participants the normal approximation to the difference is less reliable; with larger samples,
+or when the difference is clear, the flag does not appear.
+
+## Design recommendations
+
+In the simulations of the accompanying article, recovery of individual breadth depended on the number of items and
+the size of individual differences, not on sample size. With 24 items, the median correlation between true and
+estimated breadth was .68 to .88; with 12 items, .55 to .82. We recommend at least 24 items. Items whose solutions lie
+far from the cues are needed to distinguish the people with the greatest breadth.
+
+## References
+
+Beucler, J., & De Neys, W. (2026). Intuitive insight: Fast associative processes drive sound creative thinking.
+*Cognition, 271*, 106422.
+
+De Deyne, S., Navarro, D. J., Perfors, A., Brysbaert, M., & Storms, G. (2019). The "Small World of Words" English
+word association norms for over 12,000 cue words. *Behavior Research Methods, 51*(3), 987–1006.
+
+Li, B., Ding, Z., De Deyne, S., & Cai, Q. (2025). A large-scale database of Mandarin Chinese word associations from
+the Small World of Words Project. *Behavior Research Methods, 57*, Article 34.

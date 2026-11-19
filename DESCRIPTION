@@ -1,0 +1,15 @@
+Package: gvmodel
+Type: Package
+Title: Generation-Verification Model for Remote Associates Responses
+Version: 0.1.0
+Description: Estimates individual spreading breadth (generation) and verification ability from
+    remote associates test responses, using a hierarchical Bayesian model fitted in Stan. Builds
+    per-cue spreading activation on a word-association network, constructs candidate sets, and
+    returns person-level posterior summaries and screening statistics for careless responding.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Depends: R (>= 4.1)
+Imports: Matrix, methods, cmdstanr, posterior, loo, stats, utils
+Suggests: knitr, data.table
+URL: https://github.com/gxnuyuanbo-hash/gvmodel
+BugReports: https://github.com/gxnuyuanbo-hash/gvmodel/issues
