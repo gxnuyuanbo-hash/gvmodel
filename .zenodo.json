@@ -1,0 +1,8 @@
+{
+  "title": "gvmodel: Generation-verification model for remote associates responses",
+  "upload_type": "software",
+  "creators": [{"name": "Yuan, Bo"}],
+  "description": "R package that estimates spreading-activation breadth and verification ability for each person from remote associates test (RAT/CRA) responses with a hierarchical Bayesian generation-verification model fitted in Stan.",
+  "license": "MIT",
+  "keywords": ["spreading activation", "remote associates test", "semantic network", "hierarchical Bayesian modeling", "Stan", "R package"]
+}
